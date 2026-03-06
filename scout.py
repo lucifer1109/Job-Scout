@@ -26,17 +26,11 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # --- GOOGLE SHEETS AUTH ---
 # Credentials are stored as an env var (JSON string) to avoid uploading files
 def setup_sheets():
-    creds_raw = os.environ.get("GOOGLE_CREDS_JSON")
-    if not creds_raw:
+    creds_json = os.environ.get("GOOGLE_CREDS_JSON")
+    if not creds_json:
         raise ValueError("GOOGLE_CREDS_JSON environment variable not set")
-    
-    # Handle both plain JSON and base64-encoded JSON
-    try:
-        creds_dict = json.loads(creds_raw)
-    except json.JSONDecodeError:
-        import base64
-        creds_dict = json.loads(base64.b64decode(creds_raw).decode())
-    
+
+    creds_dict = json.loads(creds_json)
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     gc = gspread.authorize(creds)
@@ -358,6 +352,15 @@ def send_summary_to_slack(results, duration_seconds):
 if __name__ == "__main__":
     print(f"🤖 Job Scout starting — {len(SEARCH_GOALS)} goal(s) running in PARALLEL")
     print(f"Goals: {SEARCH_GOALS}")
+
+    # TEMPORARY DEBUG — remove after fixing
+    print("=== ENV VARS CHECK ===")
+    print(f"GEMINI_API_KEY set: {bool(os.environ.get('GEMINI_API_KEY'))}")
+    print(f"SLACK_WEBHOOK set: {bool(os.environ.get('SLACK_WEBHOOK'))}")
+    print(f"GOOGLE_CREDS_JSON set: {bool(os.environ.get('GOOGLE_CREDS_JSON'))}")
+    print(f"SHEET_NAME: {os.environ.get('SHEET_NAME')}")
+    print(f"SEARCH_GOALS: {os.environ.get('SEARCH_GOALS')}")
+    print("=== END CHECK ===")
 
     sheet = setup_sheets()
     existing_ids = set(sheet.col_values(1))
