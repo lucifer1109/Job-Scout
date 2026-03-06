@@ -26,11 +26,17 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # --- GOOGLE SHEETS AUTH ---
 # Credentials are stored as an env var (JSON string) to avoid uploading files
 def setup_sheets():
-    creds_json = os.environ.get("GOOGLE_CREDS_JSON")
-    if not creds_json:
+    creds_raw = os.environ.get("GOOGLE_CREDS_JSON")
+    if not creds_raw:
         raise ValueError("GOOGLE_CREDS_JSON environment variable not set")
-
-    creds_dict = json.loads(creds_json)
+    
+    # Handle both plain JSON and base64-encoded JSON
+    try:
+        creds_dict = json.loads(creds_raw)
+    except json.JSONDecodeError:
+        import base64
+        creds_dict = json.loads(base64.b64decode(creds_raw).decode())
+    
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     gc = gspread.authorize(creds)
