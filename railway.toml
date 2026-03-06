@@ -1,0 +1,4 @@
+[deploy]
+# Runs twice daily at 9am and 6pm IST (3:30 and 12:30 UTC)
+cronSchedule = "30 3,12 * * *"
+restartPolicyType = "never"
