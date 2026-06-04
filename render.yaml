@@ -1,0 +1,31 @@
+services:
+  - type: cron
+    name: job-scout
+    runtime: docker
+    schedule: "30 3,12 * * *"   # 9am and 6pm IST (3:30 and 12:30 UTC)
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SLACK_WEBHOOK
+        sync: false
+      - key: SLACK_SUMMARY_WEBHOOK
+        sync: false
+      - key: GOOGLE_CREDS_JSON
+        sync: false
+      - key: SHEET_NAME
+        sync: false
+      - key: SHEET_ID
+        sync: false
+      - key: SEARCH_GOALS
+        sync: false
+      - key: GOAL_CHANNELS
+        sync: false
+      - key: CONFIDENCE_THRESHOLD
+        value: "7"
+      - key: MAX_SLACK_PER_GOAL
+        value: "10"
+      - key: RESULTS_PER_SITE
+        value: "25"
+      - key: HOURS_OLD
+        value: "72"

@@ -8,7 +8,7 @@ import os
 import base64
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from google import genai
+import anthropic
 from jobspy import scrape_jobs
 import pandas as pd
 
@@ -18,18 +18,15 @@ import pandas as pd
 # See .env.example for the full list.
 # ==============================================================
 
-GEMINI_API_KEY   = os.environ["GEMINI_API_KEY"]
-SHEET_NAME       = os.environ.get("SHEET_NAME", "job scraper tool master sheet")
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+SHEET_NAME        = os.environ.get("SHEET_NAME", "job scraper tool master sheet")
+SHEET_ID          = os.environ.get("SHEET_ID", "")   # optional: target by ID instead of name
 
 # --- Slack webhooks ---
-# SLACK_WEBHOOK         → default channel for goals without a dedicated channel
-# SLACK_SUMMARY_WEBHOOK → separate #scout-ops channel for run summaries only
-# GOAL_CHANNELS         → map goals to dedicated channels (see .env.example)
 SLACK_WEBHOOK         = os.environ["SLACK_WEBHOOK"]
 SLACK_SUMMARY_WEBHOOK = os.environ.get("SLACK_SUMMARY_WEBHOOK", SLACK_WEBHOOK)
 
 # GOAL_CHANNELS format: "goal keyword:webhook_url|goal keyword2:webhook_url2"
-# Example: "founders office:https://hooks.slack.com/...|chief of staff:https://hooks.slack.com/..."
 _raw_goal_channels = os.environ.get("GOAL_CHANNELS", "")
 GOAL_CHANNEL_MAP: dict = {}
 if _raw_goal_channels:
@@ -43,12 +40,13 @@ RAW_GOALS    = os.environ.get("SEARCH_GOALS", "founders office roles in India")
 SEARCH_GOALS = [g.strip() for g in RAW_GOALS.split(",") if g.strip()]
 
 # --- Tuning knobs ---
-CONFIDENCE_THRESHOLD = int(os.environ.get("CONFIDENCE_THRESHOLD", "7"))  # silent log below this
-MAX_SLACK_PER_GOAL   = int(os.environ.get("MAX_SLACK_PER_GOAL", "10"))   # cap alerts per goal per run
-RESULTS_PER_SITE     = int(os.environ.get("RESULTS_PER_SITE", "25"))     # jobspy results per site
-HOURS_OLD            = int(os.environ.get("HOURS_OLD", "72"))            # only jobs within this window
+CONFIDENCE_THRESHOLD = int(os.environ.get("CONFIDENCE_THRESHOLD", "7"))
+MAX_SLACK_PER_GOAL   = int(os.environ.get("MAX_SLACK_PER_GOAL", "10"))
+RESULTS_PER_SITE     = int(os.environ.get("RESULTS_PER_SITE", "25"))
+HOURS_OLD            = int(os.environ.get("HOURS_OLD", "72"))
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+# Anthropic client (shared across threads — thread-safe)
+claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # ==============================================================
 # GOOGLE SHEETS AUTH
@@ -62,13 +60,30 @@ def setup_sheets():
         creds_dict = json.loads(creds_raw)
     except json.JSONDecodeError:
         creds_dict = json.loads(base64.b64decode(creds_raw).decode())
+
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive"
     ]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     gc = gspread.authorize(creds)
-    return gc.open(SHEET_NAME).sheet1
+
+    # Open by ID (preferred — survives sheet renames) or fall back to name
+    if SHEET_ID:
+        sh = gc.open_by_key(SHEET_ID)
+    else:
+        sh = gc.open(SHEET_NAME)
+
+    worksheet = sh.sheet1
+
+    # Write header row if the sheet is empty
+    if not worksheet.row_values(1):
+        worksheet.append_row([
+            "Job ID", "Title", "Company", "Location",
+            "Source", "Goal", "Score", "Reason", "Slacked?", "Timestamp"
+        ])
+
+    return worksheet
 
 sheet_lock = threading.Lock()
 
@@ -148,7 +163,6 @@ def fetch_jobs_jobspy(search_term, location):
 
 # ==============================================================
 # SLACK — DIGEST FORMAT
-# One message per goal with ALL high-confidence matches inside it
 # ==============================================================
 
 SOURCE_EMOJI = {
@@ -165,7 +179,6 @@ def get_webhook_for_goal(user_goal: str) -> str:
 
 
 def send_digest_to_slack(user_goal: str, matches: list, total_scanned: int, silent_count: int):
-    """One clean digest card per goal — all matches in a single Slack message."""
     if not matches:
         return
 
@@ -215,7 +228,6 @@ def send_digest_to_slack(user_goal: str, matches: list, total_scanned: int, sile
 
 
 def send_summary_to_slack(results: list, duration_seconds: float):
-    """Run-level summary to #scout-ops only — never clutters goal channels."""
     total = sum(c for _, c in results)
     lines = "\n".join(
         f"{'✅' if count > 0 else '⬜'} *{goal[:55]}* — {count} match{'es' if count!=1 else ''}"
@@ -246,49 +258,76 @@ def send_summary_to_slack(results: list, duration_seconds: float):
         print(f"⚠️ Summary Slack error: {e}")
 
 # ==============================================================
+# CLAUDE — JSON helper
+# Wraps all Claude API calls with retry on overload
+# ==============================================================
+
+def call_claude(system_prompt: str, user_prompt: str, retries: int = 3) -> str:
+    """Call Claude and return the text response. Retries on 529 overload."""
+    for attempt in range(retries):
+        try:
+            message = claude.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=1024,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+            return message.content[0].text
+        except anthropic.RateLimitError:
+            wait = 30 * (attempt + 1)
+            print(f"  ⏳ Claude rate limit. Waiting {wait}s...")
+            time.sleep(wait)
+        except anthropic.APIStatusError as e:
+            if e.status_code == 529:
+                wait = 20 * (attempt + 1)
+                print(f"  ⏳ Claude overloaded. Waiting {wait}s...")
+                time.sleep(wait)
+            else:
+                raise e
+    raise RuntimeError("Claude API failed after all retries")
+
+
+# ==============================================================
 # DISCOVERY
 # ==============================================================
 
 def discover_targets(user_goal: str) -> dict:
     print(f"  🕵️ Analyzing: '{user_goal}'...")
-    prompt = f"""
-    Analyze this job search goal: '{user_goal}'
+    system = (
+        "You are a job search analyst. You extract structured search parameters from natural language goals. "
+        "Always respond with valid JSON only — no markdown, no explanation, no code fences."
+    )
+    user = f"""
+Analyze this job search goal: '{user_goal}'
 
-    Return JSON with:
-    1. "search_term": role/title keywords only (e.g. "founders office", "chief of staff")
-    2. "location": city or country only (e.g. "Bengaluru", "India")
-    3. "greenhouse": Greenhouse board slugs — ONLY if highly confident
-    4. "lever": Lever posting slugs — ONLY if highly confident
+Return JSON with:
+1. "search_term": role/title keywords only (e.g. "founders office", "chief of staff")
+2. "location": city or country only (e.g. "Bengaluru", "India")
+3. "greenhouse": Greenhouse board slugs — ONLY if highly confident
+4. "lever": Lever posting slugs — ONLY if highly confident
 
-    Most Indian startups do NOT use Greenhouse or Lever. Leave both as empty lists if unsure.
+Most Indian startups do NOT use Greenhouse or Lever. Leave both as empty lists if unsure.
 
-    Return ONLY valid JSON:
-    {{"search_term": "...", "location": "...", "greenhouse": [], "lever": []}}
-    """
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config={"response_mime_type": "application/json"}
-            )
-            time.sleep(12)
-            result = json.loads(response.text)
-            result.setdefault("search_term", user_goal)
-            result.setdefault("location", "India")
-            result.setdefault("greenhouse", [])
-            result.setdefault("lever", [])
-            return result
-        except Exception as e:
-            if "429" in str(e):
-                print(f"  ⏳ Rate limit. Waiting 30s...")
-                time.sleep(30)
-            else:
-                raise e
-    return {"search_term": user_goal, "location": "India", "greenhouse": [], "lever": []}
+Return ONLY valid JSON (no markdown, no backticks):
+{{"search_term": "...", "location": "...", "greenhouse": [], "lever": []}}
+"""
+    try:
+        raw = call_claude(system, user)
+        # Strip any accidental markdown fences
+        clean = re.sub(r"```json|```", "", raw).strip()
+        result = json.loads(clean)
+        result.setdefault("search_term", user_goal)
+        result.setdefault("location", "India")
+        result.setdefault("greenhouse", [])
+        result.setdefault("lever", [])
+        return result
+    except Exception as e:
+        print(f"  ❌ Discovery error: {e}")
+        return {"search_term": user_goal, "location": "India", "greenhouse": [], "lever": []}
+
 
 # ==============================================================
-# AI FILTER — confidence scoring with threshold
+# AI FILTER — confidence scoring via Claude
 # ==============================================================
 
 def ai_filter_jobs(user_goal: str, jobs: list) -> tuple:
@@ -300,54 +339,54 @@ def ai_filter_jobs(user_goal: str, jobs: list) -> tuple:
     high, low = [], []
     batch_size = 30
 
+    system = (
+        "You are a job relevance scorer. Given a job search goal and a list of job listings, "
+        "you score each listing for relevance on a scale of 1-10. "
+        "Always respond with a valid JSON array only — no markdown, no explanation, no code fences."
+    )
+
     for i in range(0, len(jobs), batch_size):
         batch = jobs[i: i + batch_size]
         lean  = [{"id": j["id"], "title": j["title"], "co": j["co"], "loc": j["loc"]} for j in batch]
-        prompt = f"""
-        Goal: '{user_goal}'
 
-        Score each job for relevance on a scale of 1-10.
-        Only include jobs with any relevance (score >= 4). Skip completely irrelevant jobs.
+        user = f"""
+Goal: '{user_goal}'
 
-        Return JSON list:
-        [{{"id": "...", "score": 8, "reason": "One sentence why this matches."}}]
-        If nothing relevant: []
+Score each job for relevance on a scale of 1-10.
+Only include jobs with any relevance (score >= 4). Skip completely irrelevant jobs.
 
-        Jobs: {json.dumps(lean)}
-        """
-        success = False
-        while not success:
-            try:
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config={"response_mime_type": "application/json"}
-                )
-                scored = json.loads(re.sub(r"```json|```", "", response.text).strip())
-                for m in scored:
-                    job = next((j for j in batch if j["id"] == m["id"]), None)
-                    if not job:
-                        continue
-                    entry = {"job": job, "score": m.get("score", 0), "reason": m.get("reason", "")}
-                    if m.get("score", 0) >= CONFIDENCE_THRESHOLD:
-                        high.append(entry)
-                    else:
-                        low.append(entry)
-                success = True
-                time.sleep(12)
-            except Exception as e:
-                if "429" in str(e):
-                    print(f"  ⏳ Rate limit. Sleeping 45s...")
-                    time.sleep(45)
+Return a JSON array (no markdown, no backticks):
+[{{"id": "...", "score": 8, "reason": "One sentence why this matches."}}]
+If nothing is relevant, return: []
+
+Jobs to score:
+{json.dumps(lean, indent=2)}
+"""
+        try:
+            raw    = call_claude(system, user)
+            clean  = re.sub(r"```json|```", "", raw).strip()
+            scored = json.loads(clean)
+
+            for m in scored:
+                job = next((j for j in batch if j["id"] == m["id"]), None)
+                if not job:
+                    continue
+                entry = {"job": job, "score": m.get("score", 0), "reason": m.get("reason", "")}
+                if m.get("score", 0) >= CONFIDENCE_THRESHOLD:
+                    high.append(entry)
                 else:
-                    print(f"  ❌ AI filter error: {e}")
-                    break
+                    low.append(entry)
+
+        except Exception as e:
+            print(f"  ❌ AI filter error: {e}")
+            continue
 
     # Sort by score, apply per-goal cap
     high.sort(key=lambda x: x["score"], reverse=True)
     capped   = high[:MAX_SLACK_PER_GOAL]
     overflow = high[MAX_SLACK_PER_GOAL:]
     return capped, low + overflow
+
 
 # ==============================================================
 # MAIN SCOUT — one thread per goal
@@ -397,7 +436,7 @@ def run_scout_parallel(user_goal: str, sheet, existing_ids: set, existing_ids_lo
         flag = "✨" if slacked == "yes" else "🔇"
         print(f"  {flag} {tag} {job['title']} @ {job['co']} [score:{m['score']}]")
 
-    # Send ONE digest to Slack — all high-confidence matches in a single card
+    # Send ONE digest to Slack
     send_digest_to_slack(
         user_goal, high_matches,
         total_scanned=len(new_jobs),
@@ -405,6 +444,7 @@ def run_scout_parallel(user_goal: str, sheet, existing_ids: set, existing_ids_lo
     )
 
     return user_goal, len(high_matches)
+
 
 # ==============================================================
 # ENTRY POINT

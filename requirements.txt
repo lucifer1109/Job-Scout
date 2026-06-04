@@ -2,5 +2,5 @@ python-jobspy
 pandas
 gspread
 oauth2client
-google-genai
+anthropic
 requests
