@@ -1,6 +1,3 @@
-python-jobspy
-pandas
-gspread
-oauth2client
-google-genai
+flask
+flask-cors
 requests
