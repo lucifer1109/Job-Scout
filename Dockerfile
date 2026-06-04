@@ -2,13 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
+ARG CACHE_BUST=2
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source
 COPY scout.py .
 
-# Run the scout
 CMD ["python", "scout.py"]
-# cache bust Thu Jun  4 17:01:53 IST 2026
