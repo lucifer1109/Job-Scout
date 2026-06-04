@@ -1,1 +1,6 @@
-{"buildCommand":"npm run build","outputDirectory":"dist","rewrites":[{"source":"/api/(.*)","destination":"/api/index.py"}],"functions":{"api/index.py":{"runtime":"python3.9"}}}
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index.py" }],
+  "functions": { "api/index.py": { "runtime": "vercel-python@4.3.1" } }
+}
