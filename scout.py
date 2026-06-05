@@ -554,12 +554,23 @@ def discover_targets(user_goal: str) -> dict:
         "Respond with valid JSON only — no markdown, no explanation."
     )
     user = f"""
-Extract search parameters from: '{user_goal}'
+You are helping a student find a job at an early-stage startup in India.
 
-For someone looking at early-stage startups in Bengaluru/Gurgaon, use broad role terms.
-If the goal is vague (e.g. 'any role at a startup'), use search_term = 'operations OR product OR growth OR engineering OR business' 
+Their goal: '{user_goal}'
 
-Return JSON:
+Rules:
+- The user may describe a TYPE of company (e.g. "seed funded", "recently raised", "Series A") — ignore the funding language, focus on extracting a JOB ROLE to search for
+- If no specific role is mentioned, use: "operations OR product OR growth OR engineering OR business"
+- Extract city: Bengaluru/Bangalore → "Bengaluru", Gurugram/Gurgaon/NCR/Delhi → "Gurgaon", default → "Bengaluru"
+- search_term must be job titles or role keywords only, never company descriptions
+
+Examples:
+- "tech startups recently raised funding in bengaluru" → search_term: "operations OR product OR growth OR engineering OR business", location: "Bengaluru"
+- "seed funded startup in gurugram" → search_term: "operations OR product OR growth OR engineering OR business", location: "Gurgaon"
+- "founder office role in bengaluru" → search_term: "founder office OR chief of staff OR strategy OR operations", location: "Bengaluru"
+- "software engineer at Series A startup" → search_term: "software engineer OR backend engineer OR full stack", location: "Bengaluru"
+
+Return JSON only:
 {{"search_term": "...", "location": "Bengaluru", "greenhouse": [], "lever": []}}
 """
     try:
