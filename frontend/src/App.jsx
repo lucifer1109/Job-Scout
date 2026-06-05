@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:5001";
+const API = "";   // same origin — Vercel serves /api/* automatically
 
 const STATUS = {
-  idle:     { label: "Ready",    color: "#6b7280" },
-  running:  { label: "Running",  color: "#f59e0b" },
-  success:  { label: "Done",     color: "#10b981" },
-  error:    { label: "#Error",   color: "#ef4444" },
+  idle:    { label: "Ready",   color: "#6b7280" },
+  running: { label: "Running", color: "#f59e0b" },
+  success: { label: "Done",    color: "#10b981" },
+  error:   { label: "Error",   color: "#ef4444" },
 };
 
 function Dot({ status }) {
@@ -14,8 +14,7 @@ function Dot({ status }) {
   return (
     <span style={{
       display: "inline-block", width: 8, height: 8,
-      borderRadius: "50%", background: s.color,
-      marginRight: 6,
+      borderRadius: "50%", background: s.color, marginRight: 6,
       boxShadow: status === "running" ? `0 0 0 3px ${s.color}33` : "none",
       animation: status === "running" ? "pulse 1.5s ease-in-out infinite" : "none"
     }} />
@@ -31,15 +30,10 @@ function GoalTag({ goal, index, onDelete }) {
       fontSize: 14, color: "#e2e8f0"
     }}>
       <span style={{ flex: 1 }}>{goal}</span>
-      <button
-        onClick={() => onDelete(index)}
-        style={{
-          background: "none", border: "none", cursor: "pointer",
-          color: "#6b7280", fontSize: 16, padding: "0 2px",
-          lineHeight: 1, borderRadius: 4
-        }}
-        title="Remove"
-      >×</button>
+      <button onClick={() => onDelete(index)} style={{
+        background: "none", border: "none", cursor: "pointer",
+        color: "#6b7280", fontSize: 16, padding: "0 2px", lineHeight: 1, borderRadius: 4
+      }} title="Remove">×</button>
     </div>
   );
 }
@@ -64,7 +58,10 @@ function LogEntry({ deploy }) {
 }
 
 export default function App() {
-  const [goals,     setGoals]     = useState([]);
+  const [goals,     setGoals]     = useState(() => {
+    try { return JSON.parse(localStorage.getItem("scout_goals") || "[]"); }
+    catch { return []; }
+  });
   const [input,     setInput]     = useState("");
   const [runStatus, setRunStatus] = useState("idle");
   const [runMsg,    setRunMsg]    = useState("");
@@ -73,37 +70,26 @@ export default function App() {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    fetch(`${API}/api/goals`)
-      .then(r => r.json())
-      .then(setGoals)
-      .catch(() => {});
-  }, []);
+    localStorage.setItem("scout_goals", JSON.stringify(goals));
+  }, [goals]);
 
-  async function addGoal() {
+  function addGoal() {
     const g = input.trim();
-    if (!g) return;
-    const res = await fetch(`${API}/api/goals`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ goal: g })
-    });
-    const data = await res.json();
-    setGoals(data);
+    if (!g || goals.includes(g)) return;
+    setGoals(prev => [...prev, g]);
     setInput("");
     inputRef.current?.focus();
   }
 
-  async function deleteGoal(index) {
-    const res = await fetch(`${API}/api/goals/${index}`, { method: "DELETE" });
-    const data = await res.json();
-    setGoals(data);
+  function deleteGoal(index) {
+    setGoals(prev => prev.filter((_, i) => i !== index));
   }
 
   async function triggerRun() {
     setRunStatus("running");
     setRunMsg("Triggering run on Render...");
     try {
-      const res  = await fetch(`${API}/api/run`, { method: "POST" });
+      const res  = await fetch("/api/run", { method: "POST" });
       const data = await res.json();
       if (data.error) {
         setRunStatus("error");
@@ -122,7 +108,7 @@ export default function App() {
   async function fetchLogs() {
     setTab("logs");
     try {
-      const res  = await fetch(`${API}/api/logs`);
+      const res  = await fetch("/api/logs");
       const data = await res.json();
       setLogs(Array.isArray(data) ? data : []);
     } catch {
@@ -144,7 +130,6 @@ export default function App() {
         button:hover { opacity: .85; }
       `}</style>
 
-      {/* Header */}
       <div style={{ textAlign: "center", marginBottom: 48 }}>
         <div style={{
           display: "inline-flex", alignItems: "center", gap: 10,
@@ -159,14 +144,11 @@ export default function App() {
         </p>
       </div>
 
-      {/* Main card */}
       <div style={{
         width: "100%", maxWidth: 640,
         background: "#13131f", border: "1px solid #1e1e30",
         borderRadius: 16, overflow: "hidden"
       }}>
-
-        {/* Tabs */}
         <div style={{ display: "flex", borderBottom: "1px solid #1e1e30" }}>
           {[["goals", "Goals"], ["logs", "Run Logs"]].map(([id, label]) => (
             <button key={id}
@@ -182,11 +164,8 @@ export default function App() {
           ))}
         </div>
 
-        {/* Goals tab */}
         {tab === "goals" && (
           <div style={{ padding: 24 }}>
-
-            {/* Input */}
             <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
               <input
                 ref={inputRef}
@@ -200,22 +179,15 @@ export default function App() {
                   color: "#e2e8f0", outline: "none"
                 }}
               />
-              <button
-                onClick={addGoal}
-                style={{
-                  background: "#818cf8", border: "none", borderRadius: 8,
-                  padding: "10px 18px", fontSize: 14, fontWeight: 500,
-                  color: "#fff", cursor: "pointer", whiteSpace: "nowrap"
-                }}
-              >Add goal</button>
+              <button onClick={addGoal} style={{
+                background: "#818cf8", border: "none", borderRadius: 8,
+                padding: "10px 18px", fontSize: 14, fontWeight: 500,
+                color: "#fff", cursor: "pointer", whiteSpace: "nowrap"
+              }}>Add goal</button>
             </div>
 
-            {/* Goals list */}
             {goals.length === 0 ? (
-              <div style={{
-                textAlign: "center", padding: "32px 0",
-                color: "#4b5563", fontSize: 14
-              }}>
+              <div style={{ textAlign: "center", padding: "32px 0", color: "#4b5563", fontSize: 14 }}>
                 No goals yet — add one above
               </div>
             ) : (
@@ -226,7 +198,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Run button */}
             <button
               onClick={triggerRun}
               disabled={runStatus === "running" || goals.length === 0}
@@ -250,21 +221,15 @@ export default function App() {
               }}>{runMsg}</p>
             )}
 
-            <p style={{
-              marginTop: 16, textAlign: "center", fontSize: 12,
-              color: "#4b5563"
-            }}>
+            <p style={{ marginTop: 16, textAlign: "center", fontSize: 12, color: "#4b5563" }}>
               Results → your Slack channels + Google Sheet
             </p>
           </div>
         )}
 
-        {/* Logs tab */}
         {tab === "logs" && (
           <div style={{ padding: 24 }}>
-            <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-              Last 5 Render deploys
-            </p>
+            <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Last 5 Render deploys</p>
             {logs.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 0", color: "#4b5563", fontSize: 14 }}>
                 No logs found
