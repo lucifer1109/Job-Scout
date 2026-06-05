@@ -10,13 +10,13 @@ class handler(BaseHTTPRequestHandler):
             self._respond(500, {"error": "Render credentials not configured"})
             return
         headers = {"Authorization": f"Bearer {RENDER_API_KEY}", "Content-Type": "application/json"}
-        url = f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/jobs"
+        url = f"https://api.render.com/v1/cronjobs/{RENDER_SERVICE_ID}/trigger"
         try:
             resp = requests.post(url, headers=headers, json={}, timeout=10)
             if resp.status_code in (200, 201):
                 self._respond(200, {"status": "triggered"})
             else:
-                self._respond(500, {"error": f"Render API error {resp.status_code}"})
+                self._respond(500, {"error": f"Render API error {resp.status_code}: {resp.text}"})
         except Exception as e:
             self._respond(500, {"error": str(e)})
 
