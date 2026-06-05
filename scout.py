@@ -27,7 +27,7 @@ SLACK_SUMMARY_WEBHOOK = os.environ.get("SLACK_SUMMARY_WEBHOOK", SLACK_WEBHOOK)
 RAW_GOALS    = os.environ.get("SEARCH_GOALS", "any role at a high growth seed or series A startup in Bengaluru or Gurgaon")
 SEARCH_GOALS = [g.strip() for g in RAW_GOALS.split(",") if g.strip()]
 
-CONFIDENCE_THRESHOLD = int(os.environ.get("CONFIDENCE_THRESHOLD", "6"))
+CONFIDENCE_THRESHOLD = int(os.environ.get("CONFIDENCE_THRESHOLD", "5"))
 MAX_SLACK_PER_GOAL   = int(os.environ.get("MAX_SLACK_PER_GOAL", "10"))
 RESULTS_PER_SITE     = int(os.environ.get("RESULTS_PER_SITE", "25"))
 HOURS_OLD            = int(os.environ.get("HOURS_OLD", "72"))
@@ -394,7 +394,10 @@ def ai_filter_jobs(user_goal: str, jobs: list, rag_context: str) -> tuple:
         "You are a job relevance scorer for a sharp 22-year-old BITS Pilani grad who wants to join "
         "a high-growth early-stage startup in Bengaluru or Gurgaon. "
         "He values: learning, impact, smart team, growth trajectory. Pay is secondary. "
-        "Score jobs 1-10. Be strict — only score >= 7 if it's genuinely at a promising early-stage startup. "
+        "Score jobs 1-10. Be generous — score >= 6 if the company could plausibly be a startup. "
+        "IMPORTANT: Most job listings do NOT say their funding stage. Infer from the company name — "
+        "if it sounds like a startup (not a large MNC, bank, consultancy, or govt), give it the benefit of the doubt. "
+        "Penalise only clear non-starters: TCS, Infosys, Wipro, Deloitte, PwC, Accenture, banks, FMCG giants. "
         "Respond with valid JSON only."
     )
 
@@ -407,13 +410,17 @@ def ai_filter_jobs(user_goal: str, jobs: list, rag_context: str) -> tuple:
         user = f"""
 {rag_note}Goal: '{user_goal}'
 
-Score each job 1-10 for how well it fits someone who wants to join a high-growth seed/series A startup 
+Score each job 1-10 for how well it fits someone who wants to join a high-growth startup
 in Bengaluru or Gurgaon for maximum learning and impact.
 
-High scores (7+) only if:
-- Company appears to be an early-stage startup (not a big corp, MNC, or agency)
-- Role offers real ownership and learning
-- Located in Bengaluru or Gurgaon/NCR
+Scoring guide:
+- 8-10: Clearly a startup, interesting role, good location
+- 6-7: Probably a startup or small company, decent role
+- 4-5: Unclear company type, or large company with interesting role
+- 1-3: Definitely a large MNC, consultancy, bank, or government
+
+DO NOT penalise a job just because the listing doesn't mention "seed" or "Series A" — most startups don't write that in job posts.
+Give benefit of the doubt to unknown company names — they are more likely startups than MNCs.
 
 Return JSON array (no markdown):
 [{{"id": "...", "score": 8, "reason": "One sentence why this fits."}}]
