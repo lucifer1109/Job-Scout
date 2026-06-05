@@ -1,7 +1,5 @@
 import requests, os, json, sys
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import parse_qs
-import io
 
 RENDER_API_KEY    = os.environ.get("RENDER_API_KEY", "")
 RENDER_SERVICE_ID = os.environ.get("RENDER_SERVICE_ID", "")
@@ -9,10 +7,9 @@ RENDER_SERVICE_ID = os.environ.get("RENDER_SERVICE_ID", "")
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not RENDER_API_KEY or not RENDER_SERVICE_ID:
-            self._respond(500, {"error": f"Missing creds"})
+            self._respond(500, {"error": "Missing creds"})
             return
 
-        # Read goals from request body
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b"{}"
         try:
@@ -21,22 +18,26 @@ class handler(BaseHTTPRequestHandler):
         except:
             goals = []
 
-        headers = {"Authorization": f"Bearer {RENDER_API_KEY}", "Content-Type": "application/json"}
-        url = f"https://api.render.com/v1/cron-jobs/{RENDER_SERVICE_ID}/runs"
+        hdrs = {"Authorization": f"Bearer {RENDER_API_KEY}", "Content-Type": "application/json"}
 
-        body_payload = {}
+        # Step 1: update SEARCH_GOALS env var on Render if goals provided
         if goals:
-            goals_str = "|".join(goals)
-            body_payload = {"startCommand": f"SEARCH_GOALS=\"{goals_str}\" python scout.py"}
+            goals_str = ",".join(goals)
+            env_url = f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars"
+            env_resp = requests.put(env_url, headers=hdrs, json=[
+                {"key": "SEARCH_GOALS", "value": goals_str}
+            ], timeout=10)
+            print(f"[run] env update status={env_resp.status_code} body={env_resp.text[:200]}", file=sys.stderr)
 
-        print(f"[run] goals={goals} hitting {url}", file=sys.stderr)
+        # Step 2: trigger the cron job
+        trigger_url = f"https://api.render.com/v1/cron-jobs/{RENDER_SERVICE_ID}/runs"
         try:
-            resp = requests.post(url, headers=headers, json=body_payload, timeout=10)
-            print(f"[run] status={resp.status_code} body={resp.text[:300]}", file=sys.stderr)
+            resp = requests.post(trigger_url, headers=hdrs, json={}, timeout=10)
+            print(f"[run] trigger status={resp.status_code} body={resp.text[:200]}", file=sys.stderr)
             if resp.status_code in (200, 201):
                 self._respond(200, {"status": "triggered"})
             else:
-                self._respond(500, {"error": f"Render {resp.status_code}: {resp.text[:300]}"})
+                self._respond(500, {"error": f"Render {resp.status_code}: {resp.text[:200]}"})
         except Exception as e:
             self._respond(500, {"error": str(e)})
 
