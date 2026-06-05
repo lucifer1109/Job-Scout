@@ -678,8 +678,8 @@ if __name__ == "__main__":
                     print(f"✅ Done: '{goal}' → {count} matches")
                 except Exception as e:
                     goal = futures[future]
-                print(f"❌ Failed: '{goal}' → {e}")
-                results.append((goal, 0))
+                    print(f"❌ Failed: '{goal}' → {e}")
+                    results.append((goal, 0))
 
     duration      = time.time() - start_time
     total         = sum(c for _, c in results)
