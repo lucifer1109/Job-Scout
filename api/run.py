@@ -20,20 +20,33 @@ class handler(BaseHTTPRequestHandler):
 
         hdrs = {"Authorization": f"Bearer {RENDER_API_KEY}", "Content-Type": "application/json"}
 
-        # Step 1: update SEARCH_GOALS env var on Render if goals provided
+        # Step 1: update only SEARCH_GOALS, preserving all other env vars
         if goals:
             goals_str = ",".join(goals)
+            # First fetch existing env vars
             env_url = f"https://api.render.com/v1/services/{RENDER_SERVICE_ID}/env-vars"
-            env_resp = requests.put(env_url, headers=hdrs, json=[
-                {"key": "SEARCH_GOALS", "value": goals_str}
-            ], timeout=10)
-            print(f"[run] env update status={env_resp.status_code} body={env_resp.text[:200]}", file=sys.stderr)
+            existing_resp = requests.get(env_url, headers=hdrs, timeout=10)
+            if existing_resp.status_code == 200:
+                existing = existing_resp.json()
+                # Update or add SEARCH_GOALS
+                found = False
+                for var in existing:
+                    if var.get("envVar", {}).get("key") == "SEARCH_GOALS":
+                        var["envVar"]["value"] = goals_str
+                        found = True
+                        break
+                if not found:
+                    existing.append({"envVar": {"key": "SEARCH_GOALS", "value": goals_str}})
+                # PUT back the full list
+                put_body = [{"key": v["envVar"]["key"], "value": v["envVar"]["value"]} for v in existing]
+                update_resp = requests.put(env_url, headers=hdrs, json=put_body, timeout=10)
+                print(f"[run] env update={update_resp.status_code}", file=sys.stderr)
 
         # Step 2: trigger the cron job
         trigger_url = f"https://api.render.com/v1/cron-jobs/{RENDER_SERVICE_ID}/runs"
         try:
             resp = requests.post(trigger_url, headers=hdrs, json={}, timeout=10)
-            print(f"[run] trigger status={resp.status_code} body={resp.text[:200]}", file=sys.stderr)
+            print(f"[run] trigger={resp.status_code} {resp.text[:100]}", file=sys.stderr)
             if resp.status_code in (200, 201):
                 self._respond(200, {"status": "triggered"})
             else:
