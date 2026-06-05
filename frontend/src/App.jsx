@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 
-const API = "";   // same origin — Vercel serves /api/* automatically
-
 const STATUS = {
   idle:    { label: "Ready",   color: "#6b7280" },
   running: { label: "Running", color: "#f59e0b" },
@@ -58,7 +56,7 @@ function LogEntry({ deploy }) {
 }
 
 export default function App() {
-  const [goals,     setGoals]     = useState(() => {
+  const [goals, setGoals] = useState(() => {
     try { return JSON.parse(localStorage.getItem("scout_goals") || "[]"); }
     catch { return []; }
   });
@@ -89,7 +87,11 @@ export default function App() {
     setRunStatus("running");
     setRunMsg("Triggering run on Render...");
     try {
-      const res  = await fetch("/api/run", { method: "POST" });
+      const res = await fetch("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goals })
+      });
       const data = await res.json();
       if (data.error) {
         setRunStatus("error");
@@ -139,9 +141,7 @@ export default function App() {
           <span style={{ fontSize: 18 }}>🎯</span>
           <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: "0.02em" }}>Job Scout</span>
         </div>
-        <p style={{ color: "#6b7280", fontSize: 14, margin: 0 }}>
-          Describe what you want. Scout finds it.
-        </p>
+        <p style={{ color: "#6b7280", fontSize: 14, margin: 0 }}>Describe what you want. Scout finds it.</p>
       </div>
 
       <div style={{
@@ -192,9 +192,7 @@ export default function App() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 24 }}>
-                {goals.map((g, i) => (
-                  <GoalTag key={i} goal={g} index={i} onDelete={deleteGoal} />
-                ))}
+                {goals.map((g, i) => <GoalTag key={i} goal={g} index={i} onDelete={deleteGoal} />)}
               </div>
             )}
 

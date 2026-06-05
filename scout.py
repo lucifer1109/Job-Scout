@@ -659,22 +659,25 @@ if __name__ == "__main__":
 
     # Step 2: Job board scraping for each goal
     results = []
-    max_workers = min(len(SEARCH_GOALS), 3)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(
-                run_scout_parallel, goal, jobs_sheet, companies_sheet,
-                existing_ids, existing_ids_lock, rag_context
-            ): goal
-            for goal in SEARCH_GOALS
-        }
-        for future in as_completed(futures):
-            try:
-                goal, count = future.result()
-                results.append((goal, count))
-                print(f"✅ Done: '{goal}' → {count} matches")
-            except Exception as e:
-                goal = futures[future]
+    if not SEARCH_GOALS:
+        print("No goals set — skipping job scraping.")
+    else:
+        max_workers = min(len(SEARCH_GOALS), 3)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    run_scout_parallel, goal, jobs_sheet, companies_sheet,
+                    existing_ids, existing_ids_lock, rag_context
+                ): goal
+                for goal in SEARCH_GOALS
+            }
+            for future in as_completed(futures):
+                try:
+                    goal, count = future.result()
+                    results.append((goal, count))
+                    print(f"✅ Done: '{goal}' → {count} matches")
+                except Exception as e:
+                    goal = futures[future]
                 print(f"❌ Failed: '{goal}' → {e}")
                 results.append((goal, 0))
 
