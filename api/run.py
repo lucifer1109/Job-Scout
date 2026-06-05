@@ -10,7 +10,7 @@ class handler(BaseHTTPRequestHandler):
             self._respond(500, {"error": f"Missing creds — KEY={'set' if RENDER_API_KEY else 'MISSING'} ID={'set' if RENDER_SERVICE_ID else 'MISSING'}"})
             return
         headers = {"Authorization": f"Bearer {RENDER_API_KEY}", "Content-Type": "application/json"}
-        url = f"https://api.render.com/v1/cronjobs/{RENDER_SERVICE_ID}/trigger"
+        url = f"https://api.render.com/v1/cron-jobs/{RENDER_SERVICE_ID}/runs"
         print(f"[run] hitting {url}", file=sys.stderr)
         try:
             resp = requests.post(url, headers=headers, json={}, timeout=10)
