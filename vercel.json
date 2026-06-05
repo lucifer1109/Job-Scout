@@ -2,11 +2,11 @@
   "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
-    { "source": "/api/run",  "destination": "/frontend/api/run.py"  },
-    { "source": "/api/logs", "destination": "/frontend/api/logs.py" }
+    { "source": "/api/run",  "destination": "/api/run.py"  },
+    { "source": "/api/logs", "destination": "/api/logs.py" }
   ],
   "functions": {
-    "frontend/api/run.py":  { "runtime": "@vercel/python@4.3.1" },
-    "frontend/api/logs.py": { "runtime": "@vercel/python@4.3.1" }
+    "api/run.py":  { "runtime": "@vercel/python@4.3.1" },
+    "api/logs.py": { "runtime": "@vercel/python@4.3.1" }
   }
 }
