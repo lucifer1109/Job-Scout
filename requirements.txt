@@ -1,7 +1,1 @@
-python-jobspy
-pandas
-gspread
-oauth2client
-anthropic
-requests
-feedparser
+requests==2.34.2
